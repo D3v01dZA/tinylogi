@@ -1,0 +1,24 @@
+# Copy to ~/.config/tinylogi.toml. Every setting is optional.
+
+device = "MX Master 4"     # substring of the product name; default: first Logitech HID++ device
+
+dpi = 1200
+
+[smartshift]
+mode = "ratchet"           # "ratchet" or "freespin"
+threshold = 12             # scroll speed at which ratchet lets go into free spin
+
+[wheel]
+hires = true
+invert = false
+
+[thumbwheel]
+invert = true             # flip the side wheel's scroll direction
+
+# Button names: middle, back, forward, thumb, shift. Others by hex id, see `tinylogi --list`.
+# A string is a key combo sent on press. A table makes it a gesture button:
+# hold and move the mouse, the combo fires on release.
+[buttons]
+back = "cmd+["
+forward = "cmd+]"
+thumb = { tap = "ctrl+up", left = "ctrl+left", right = "ctrl+right", down = "ctrl+down" }

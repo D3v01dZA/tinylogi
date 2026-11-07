@@ -1,0 +1,10 @@
+[package]
+name = "tinylogi"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+hidapi = { version = "2.6.7", default-features = false, features = ["macos-shared-device"] }
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.2.1"
