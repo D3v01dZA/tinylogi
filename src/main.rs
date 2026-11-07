@@ -150,7 +150,7 @@ fn run() -> Result<(), String> {
     if !bindings.is_empty() && !keys::trusted() {
         eprintln!(
             "warning: no Accessibility permission, key presses will be dropped \
-             (System Settings → Privacy & Security → Accessibility)"
+             (System Settings → Privacy & Security → Accessibility, and Device Control & Data Access if present)"
         );
     }
 
@@ -161,7 +161,7 @@ fn run() -> Result<(), String> {
     if !hidpp::request_access() {
         return Err(
             "no Input Monitoring permission; grant it to this terminal (or binary) in \
-                    System Settings → Privacy & Security → Input Monitoring, then restart it"
+                    System Settings → Privacy & Security → Input Monitoring (or Device Control & Data Access), then restart it"
                 .into(),
         );
     }
