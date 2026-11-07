@@ -9,7 +9,7 @@ mode = "ratchet"           # "ratchet" or "freespin"
 threshold = 12             # scroll speed at which ratchet lets go into free spin
 
 [wheel]
-hires = true
+hires = false             # macOS scrolls too fast in hi-res mode; leave off
 invert = false
 
 [thumbwheel]
