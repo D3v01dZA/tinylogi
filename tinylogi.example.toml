@@ -15,7 +15,7 @@ invert = false
 [thumbwheel]
 invert = true             # flip the side wheel's scroll direction
 
-# Button names: middle, back, forward, thumb, shift. Others by hex id, see `tinylogi --list`.
+# Button names: middle, back, forward, thumb, shift, haptic. Others by hex id, see `tinylogi --list`.
 # A string is a key combo sent on press. A table makes it a gesture button:
 # hold and move the mouse, the combo fires on release.
 [buttons]

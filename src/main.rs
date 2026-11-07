@@ -35,6 +35,7 @@ const BUTTONS: &[(&str, u16)] = &[
     ("forward", 0x56),
     ("thumb", 0xc3),
     ("shift", 0xc4),
+    ("haptic", 0x01a0), // MX Master 4 haptic panel
 ];
 
 // Movement (in sensor counts) a gesture button must exceed to count as a swipe rather than a tap.
