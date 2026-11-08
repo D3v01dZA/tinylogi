@@ -4,11 +4,13 @@ A tiny alternative to Logitech Options+ for macOS: one binary, one TOML file, no
 
 tinylogi talks Logitech's HID++ 2.0 protocol directly to your mouse. It sets DPI, SmartShift,
 the scroll wheel and the thumb wheel, and remaps buttons (including hold-and-swipe gestures) to
-keyboard shortcuts. It runs in the foreground and reapplies settings when the device reconnects.
+keyboard shortcuts. It runs in the foreground, reapplies settings when the device reconnects, and
+restarts itself when the config file changes.
 Instead of a per-model device database, it asks each device at runtime which features it
 supports, which keeps the whole thing to a few hundred lines of Rust.
 
-Tested with the MX Master 4 over Bluetooth. Logitech receivers (Bolt/Unifying) aren't supported.
+Tested with the MX Master 4 over Bluetooth. Devices behind a Bolt or Unifying receiver work too,
+but that path hasn't been tested on real hardware yet.
 
 ## Install
 
@@ -58,11 +60,8 @@ Every setting is optional; anything left out stays as the device has it. Use one
 block per device. Run `tinylogi --list` to see each connected device's remappable buttons. The
 [example config](tinylogi.example.toml) documents every option.
 
-Edit the config, then restart tinylogi to apply it:
-
-```sh
-launchctl kickstart -k gui/$(id -u)/net.caltona.tinylogi
-```
+tinylogi watches the config file and applies changes within a second, handing the device back
+and restarting in place. If the new file has an error, it logs it and keeps the current settings.
 
 ## Development
 

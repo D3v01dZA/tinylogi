@@ -16,6 +16,7 @@ use hidpp::Device;
 use keys::Combo;
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::os::unix::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::time::Duration;
 
@@ -130,6 +131,7 @@ struct Features {
 }
 
 static STOP: AtomicBool = AtomicBool::new(false);
+static RELOAD: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_signal(_: i32) {
     STOP.store(true, Relaxed);
@@ -167,27 +169,10 @@ fn run() -> Result<(), String> {
             std::env::var("HOME").unwrap_or_default()
         )
     });
-    let cfg: Config = match std::fs::read_to_string(&path) {
-        Ok(s) => toml::from_str(&s).map_err(|e| format!("{path}: {e}"))?,
-        Err(_) if list => Config::default(),
-        Err(e) => return Err(format!("{path}: {e}")),
+    let profiles = match load(&path, once) {
+        Err(_) if list && std::fs::metadata(&path).is_err() => vec![],
+        result => result?,
     };
-    if !list && cfg.devices.is_empty() {
-        return Err(format!("{path}: no [[device]] entries"));
-    }
-    if cfg.devices.len() > 1 && cfg.devices.iter().any(|d| d.name.is_none()) {
-        return Err(format!(
-            "{path}: with several [[device]] entries, each needs a name"
-        ));
-    }
-    let profiles = cfg
-        .devices
-        .into_iter()
-        .map(|cfg| {
-            let bindings = if once { vec![] } else { bindings(&cfg)? };
-            Ok(Profile { cfg, bindings })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
     if profiles.iter().any(|p| !p.bindings.is_empty()) && !keys::trusted() {
         eprintln!(
             "warning: no Accessibility permission, key presses will be dropped \
@@ -209,14 +194,67 @@ fn run() -> Result<(), String> {
     if list {
         return list_all();
     }
-    // One thread per device, each with its own connect/reconnect loop.
+    // One thread per device, each with its own connect/reconnect loop, plus a config watcher.
     std::thread::scope(|s| {
+        if !once {
+            s.spawn(|| watch(&path));
+        }
         let threads: Vec<_> = profiles
             .iter()
             .map(|p| s.spawn(move || supervise(p, once)))
             .collect();
         threads.into_iter().try_for_each(|t| t.join().unwrap())
-    })
+    })?;
+    if RELOAD.load(Relaxed) {
+        // Every device has been handed back; start over as the same process with the new config.
+        let err = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
+            .args(std::env::args_os().skip(1))
+            .exec();
+        return Err(format!("restarting: {err}"));
+    }
+    Ok(())
+}
+
+fn load(path: &str, once: bool) -> Result<Vec<Profile>, String> {
+    let s = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let cfg: Config = toml::from_str(&s).map_err(|e| format!("{path}: {e}"))?;
+    if cfg.devices.is_empty() {
+        return Err(format!("{path}: no [[device]] entries"));
+    }
+    if cfg.devices.len() > 1 && cfg.devices.iter().any(|d| d.name.is_none()) {
+        return Err(format!(
+            "{path}: with several [[device]] entries, each needs a name"
+        ));
+    }
+    cfg.devices
+        .into_iter()
+        .map(|cfg| {
+            let bindings = if once { vec![] } else { bindings(&cfg)? };
+            Ok(Profile { cfg, bindings })
+        })
+        .collect()
+}
+
+/// Polls the config file; when it changes to something valid, stops everything for a restart.
+fn watch(path: &str) {
+    let modified = || std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    let mut seen = modified();
+    while !STOP.load(Relaxed) {
+        std::thread::sleep(Duration::from_secs(1));
+        let now = modified();
+        if now.is_none() || now == seen {
+            continue;
+        }
+        seen = now;
+        match load(path, false) {
+            Ok(_) => {
+                eprintln!("{path} changed, restarting");
+                RELOAD.store(true, Relaxed);
+                STOP.store(true, Relaxed);
+            }
+            Err(e) => eprintln!("{e}; keeping the current config"),
+        }
+    }
 }
 
 fn supervise(p: &Profile, once: bool) -> Result<(), String> {
@@ -386,6 +424,12 @@ fn listen(dev: &Device, feats: &mut Features, p: &Profile) -> Result<(), String>
 
     while !STOP.load(Relaxed) {
         let Some(r) = dev.read(500)? else { continue };
+        if hidpp::is_link_up(&r) {
+            eprintln!("{} connected to its receiver, reapplying", dev.name);
+            *feats = apply(dev, p)?;
+            (pressed, gesture) = (vec![], None);
+            continue;
+        }
         if r[3] & 0x0f != 0 {
             continue; // a late response to one of our requests, not a notification
         }
