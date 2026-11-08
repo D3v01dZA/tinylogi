@@ -4,12 +4,11 @@ BIN := target/release/tinylogi
 APP := target/Tinylogi.app
 ZIP := target/Tinylogi-$(VERSION).zip
 SIGN := codesign -f -s tinylogi -i net.caltona.tinylogi
-AGENT := gui/$(shell id -u)/net.caltona.tinylogi
 TAG := v$(VERSION)
 TAP ?= ../homebrew-tap
 CASK := $(TAP)/Casks/tinylogi.rb
 
-.PHONY: build app dist release restart log
+.PHONY: build app dist release dev log
 
 # Sign a fresh copy and move it into place: macOS caches signatures per file, and a binary
 # rewritten in place gets killed at launch (OS_REASON_CODESIGNING).
@@ -50,8 +49,10 @@ release:
 	git -C $(TAP) commit -qam "tinylogi $(VERSION)"
 	git -C $(TAP) push -q
 
-restart: build
-	launchctl kickstart -k $(AGENT)
+# Runs the current build in the foreground with debug logging, pausing the installed app.
+dev: app
+	macos/dev.sh $(CURDIR)/$(APP)
 
+# Follows the installed (Homebrew) app's log.
 log:
 	tail -f /tmp/tinylogi.log
