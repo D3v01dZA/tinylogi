@@ -1,6 +1,8 @@
 // Minimal HID++ 2.0 over a direct (Bluetooth) connection. Only long reports are used.
 
 use hidapi::{HidApi, HidDevice};
+use std::ffi::CString;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 pub type Report = [u8; 20];
@@ -28,14 +30,25 @@ pub fn request_access() -> bool {
     unsafe { IOHIDRequestAccess(1) } // kIOHIDRequestTypeListenEvent
 }
 
+/// Paths of devices currently open, so two config entries never drive the same device.
+static OPEN: Mutex<Vec<CString>> = Mutex::new(Vec::new());
+
 pub struct Device {
     hid: HidDevice,
+    path: CString,
     pub name: String,
 }
 
+impl Drop for Device {
+    fn drop(&mut self) {
+        OPEN.lock().unwrap().retain(|p| *p != self.path);
+    }
+}
+
 impl Device {
-    /// Opens the HID++ collection of the first Logitech device whose name contains `name`.
+    /// Opens the HID++ collection of the first free Logitech device whose name contains `name`.
     pub fn open(api: &HidApi, name: Option<&str>) -> Result<Device, String> {
+        let mut open = OPEN.lock().unwrap();
         let info = api
             .device_list()
             .find(|d| {
@@ -45,11 +58,14 @@ impl Device {
                         (0xff43, 0x0202) | (0xff00, 0x0002)
                     )
                     && name.is_none_or(|n| d.product_string().unwrap_or("").contains(n))
+                    && !open.iter().any(|p| p.as_c_str() == d.path())
             })
             .ok_or("no matching Logitech HID++ device found")?;
         let hid = info.open_device(api).map_err(|e| e.to_string())?;
+        let path = info.path().to_owned();
+        open.push(path.clone());
         let name = info.product_string().unwrap_or("?").to_string();
-        Ok(Device { hid, name })
+        Ok(Device { hid, path, name })
     }
 
     /// Reads one HID++ long report; Ok(None) on timeout. Errors mean the device went away.

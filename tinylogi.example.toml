@@ -1,24 +1,47 @@
-# Copy to ~/.config/tinylogi.toml. Every setting is optional.
+# Copy to ~/.config/tinylogi.toml. Every setting is optional: leaving one out means
+# tinylogi doesn't touch it, so the device keeps whatever it has.
+#
+# One [[device]] block per device. Its [device.*] tables belong to the [[device]] above them.
+# With several blocks, each needs a name.
 
-device = "MX Master 4"     # substring of the product name; default: first Logitech HID++ device
+[[device]]
+name = "MX Master 4"       # substring of the product name; default: first Logitech HID++ device
+dpi = 1200                 # pointer speed; default: unchanged
 
-dpi = 1200
+[device.smartshift]
+mode = "ratchet"           # "ratchet" or "freespin"; default: unchanged
+threshold = 12             # 1-255, scroll speed at which ratchet lets go into free spin,
+                           # 255 = never; default: unchanged
 
-[smartshift]
-mode = "ratchet"           # "ratchet" or "freespin"
-threshold = 12             # scroll speed at which ratchet lets go into free spin
+[device.wheel]
+hires = true               # only use with speed; without it macOS scrolls far too fast.
+                           # default: unchanged
+invert = false             # default: unchanged
+speed = 1.0                # tinylogi drives scrolling: smooth pixel scrolling, 1.0 = 32px per
+                           # notch. default: unset, macOS handles the wheel itself
 
-[wheel]
-hires = false             # macOS scrolls too fast in hi-res mode; leave off
-invert = false
+[device.thumbwheel]
+invert = true              # flip the side wheel's scroll direction. default: unchanged
+                           # (leave out the whole [device.thumbwheel] table to not touch it)
 
-[thumbwheel]
-invert = true             # flip the side wheel's scroll direction
-
-# Button names: middle, back, forward, thumb, shift, haptic. Others by hex id, see `tinylogi --list`.
-# A string is a key combo sent on press. A table makes it a gesture button:
-# hold and move the mouse, the combo fires on release.
-[buttons]
-back = "cmd+["
-forward = "cmd+]"
+# Button names: middle, back, forward, thumb, shift, haptic. Others by hex id, see
+# `tinylogi --list`. A string is a key combo sent on press. A table makes it a gesture button:
+# hold and move the mouse, the combo fires on release; any of tap/up/down/left/right
+# can be left out, and that motion then does nothing.
+# A button that isn't listed keeps its normal function.
+[device.buttons]
+# middle = "cmd+w"         # default: normal middle click
+back = "cmd+["             # default: normal back button
+forward = "cmd+]"          # default: normal forward button
 thumb = { tap = "ctrl+up", left = "ctrl+left", right = "ctrl+right", down = "ctrl+down" }
+                           # up: unset. default: Logitech's built-in gesture button behaviour
+shift = "cmd+shift+5"      # button behind the wheel; default: toggles ratchet/free spin
+# "0x00d7" = "..."         # unidentified MX Master 4 control; default: unchanged
+haptic = { tap = "cmd+space", up = "cmd+tab", down = "cmd+w", left = "cmd+shift+[", right = "cmd+shift+]" }
+                           # default: MX Master 4 haptic panel's built-in behaviour
+
+# A second device, e.g. a keyboard:
+# [[device]]
+# name = "MX Keys"
+# [device.buttons]
+# "0x00e3" = "cmd+space"

@@ -23,7 +23,7 @@ const USAGE: &str = "usage: tinylogi [--once | --list] [--debug] [config]
 
   (default)  apply config, then stay in the foreground handling buttons
   --once     apply dpi/smartshift/wheel/thumbwheel settings and exit
-  --list     print the device's remappable buttons
+  --list     print every connected device's remappable buttons
   --debug    log HID++ traffic, button events and key presses to stderr
 
 config defaults to ~/.config/tinylogi.toml";
@@ -41,10 +41,20 @@ const BUTTONS: &[(&str, u16)] = &[
 // Movement (in sensor counts) a gesture button must exceed to count as a swipe rather than a tap.
 const SWIPE_THRESHOLD: i32 = 50;
 
+// Pixels scrolled per wheel notch at speed 1.0 when tinylogi drives the wheel.
+const PIXELS_PER_NOTCH: f64 = 32.0;
+
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct Config {
-    device: Option<String>,
+    #[serde(default, rename = "device")]
+    devices: Vec<DeviceConfig>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeviceConfig {
+    name: Option<String>,
     dpi: Option<u16>,
     smartshift: Option<SmartShift>,
     wheel: Option<Wheel>,
@@ -72,6 +82,7 @@ enum WheelMode {
 struct Wheel {
     hires: Option<bool>,
     invert: Option<bool>,
+    speed: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -98,10 +109,24 @@ enum Action {
     Gesture([Option<Combo>; 5]), // tap, up, down, left, right
 }
 
+/// One [[device]] entry with its buttons parsed.
+struct Profile {
+    cfg: DeviceConfig,
+    bindings: Vec<(u16, Action)>,
+}
+
+impl Profile {
+    fn label(&self) -> &str {
+        self.cfg.name.as_deref().unwrap_or("any Logitech device")
+    }
+}
+
 /// Runtime indices of the features the event loop needs to recognise notifications.
 struct Features {
     reprog: Option<u8>,
     wireless: Option<u8>,
+    wheel: Option<u8>, // set only when tinylogi drives scrolling
+    wheel_multiplier: f64,
 }
 
 static STOP: AtomicBool = AtomicBool::new(false);
@@ -147,8 +172,23 @@ fn run() -> Result<(), String> {
         Err(_) if list => Config::default(),
         Err(e) => return Err(format!("{path}: {e}")),
     };
-    let bindings = if once { vec![] } else { bindings(&cfg)? };
-    if !bindings.is_empty() && !keys::trusted() {
+    if !list && cfg.devices.is_empty() {
+        return Err(format!("{path}: no [[device]] entries"));
+    }
+    if cfg.devices.len() > 1 && cfg.devices.iter().any(|d| d.name.is_none()) {
+        return Err(format!(
+            "{path}: with several [[device]] entries, each needs a name"
+        ));
+    }
+    let profiles = cfg
+        .devices
+        .into_iter()
+        .map(|cfg| {
+            let bindings = if once { vec![] } else { bindings(&cfg)? };
+            Ok(Profile { cfg, bindings })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if profiles.iter().any(|p| !p.bindings.is_empty()) && !keys::trusted() {
         eprintln!(
             "warning: no Accessibility permission, key presses will be dropped \
              (System Settings → Privacy & Security → Accessibility, and Device Control & Data Access if present)"
@@ -166,14 +206,28 @@ fn run() -> Result<(), String> {
                 .into(),
         );
     }
+    if list {
+        return list_all();
+    }
+    // One thread per device, each with its own connect/reconnect loop.
+    std::thread::scope(|s| {
+        let threads: Vec<_> = profiles
+            .iter()
+            .map(|p| s.spawn(move || supervise(p, once)))
+            .collect();
+        threads.into_iter().try_for_each(|t| t.join().unwrap())
+    })
+}
+
+fn supervise(p: &Profile, once: bool) -> Result<(), String> {
     let mut api = HidApi::new().map_err(|e| e.to_string())?;
     let mut last_err = String::new();
     loop {
-        match session(&api, &cfg, &bindings, once, list) {
+        match session(&api, p, once) {
             Ok(()) => return Ok(()),
-            Err(e) if once || list => return Err(e),
+            Err(e) if once => return Err(format!("{}: {e}", p.label())),
             Err(e) if e != last_err => {
-                eprintln!("{e}, waiting for device");
+                eprintln!("{}: {e}, waiting for device", p.label());
                 last_err = e;
             }
             Err(_) => {}
@@ -188,10 +242,11 @@ fn run() -> Result<(), String> {
     }
 }
 
-fn bindings(cfg: &Config) -> Result<Vec<(u16, Action)>, String> {
+fn bindings(cfg: &DeviceConfig) -> Result<Vec<(u16, Action)>, String> {
+    let label = cfg.name.as_deref().unwrap_or("device");
     let mut out = vec![];
     for (name, binding) in &cfg.buttons {
-        let ctx = |e: String| format!("buttons.{name}: {e}");
+        let ctx = |e: String| format!("{label}: buttons.{name}: {e}");
         let cid = BUTTONS
             .iter()
             .find(|b| b.0 == name)
@@ -223,29 +278,25 @@ fn bindings(cfg: &Config) -> Result<Vec<(u16, Action)>, String> {
     Ok(out)
 }
 
-fn session(
-    api: &HidApi,
-    cfg: &Config,
-    bindings: &[(u16, Action)],
-    once: bool,
-    list: bool,
-) -> Result<(), String> {
-    let dev = Device::open(api, cfg.device.as_deref())?;
-    if list {
-        return list_controls(&dev);
-    }
-    let mut feats = apply(&dev, cfg, bindings)?;
+fn session(api: &HidApi, p: &Profile, once: bool) -> Result<(), String> {
+    let dev = Device::open(api, p.cfg.name.as_deref())?;
+    let mut feats = apply(&dev, p)?;
     eprintln!("configured {}", dev.name);
     if once {
         return Ok(());
     }
-    listen(&dev, &mut feats, cfg, bindings)?;
-    // Diversion outlives us until the mouse reconnects, so hand the buttons back on exit.
+    listen(&dev, &mut feats, p)?;
+    // Diversion outlives us until the mouse reconnects, so hand buttons and wheel back on exit.
     if let Some(f) = feats.reprog {
-        for (cid, action) in bindings {
+        for (cid, action) in &p.bindings {
             let [hi, lo] = cid.to_be_bytes();
             dev.call(f, 3, &[hi, lo, reporting_flags(action, false)])?;
         }
+    }
+    if let Some(f) = feats.wheel {
+        // Also drop hi-res: undiverted, macOS treats every hi-res step as a full notch.
+        let mode = dev.call(f, 1, &[])?[4];
+        dev.call(f, 2, &[mode & !0x03])?;
     }
     Ok(())
 }
@@ -266,7 +317,8 @@ fn reporting_flags(action: &Action, on: bool) -> u8 {
     if on { bits | bits >> 1 } else { bits }
 }
 
-fn apply(dev: &Device, cfg: &Config, bindings: &[(u16, Action)]) -> Result<Features, String> {
+fn apply(dev: &Device, p: &Profile) -> Result<Features, String> {
+    let cfg = &p.cfg;
     if let Some(dpi) = cfg.dpi {
         let f = need(dev, hidpp::ADJUSTABLE_DPI, "dpi")?;
         let [hi, lo] = dpi.to_be_bytes();
@@ -280,10 +332,13 @@ fn apply(dev: &Device, cfg: &Config, bindings: &[(u16, Action)]) -> Result<Featu
             None => dev.call(need(dev, hidpp::SMART_SHIFT, "smartshift")?, 1, &params)?,
         };
     }
+    let (mut wheel, mut wheel_multiplier) = (None, 1.0);
     if let Some(w) = &cfg.wheel {
         let f = need(dev, hidpp::HIRES_WHEEL, "wheel settings")?;
         let mut mode = dev.call(f, 1, &[])?[4];
-        for (bit, on) in [(0x02, w.hires), (0x04, w.invert)] {
+        // Mode bits: 0x01 report to tinylogi instead of the OS, 0x02 hi-res, 0x04 invert.
+        let divert = w.speed.is_some();
+        for (bit, on) in [(0x01, Some(divert)), (0x02, w.hires), (0x04, w.invert)] {
             match on {
                 Some(true) => mode |= bit,
                 Some(false) => mode &= !bit,
@@ -291,6 +346,11 @@ fn apply(dev: &Device, cfg: &Config, bindings: &[(u16, Action)]) -> Result<Featu
             }
         }
         dev.call(f, 2, &[mode])?;
+        if divert {
+            // Capability byte 0: hi-res steps per notch.
+            wheel_multiplier = dev.call(f, 0, &[])?[4].max(1) as f64;
+            wheel = Some(f);
+        }
     }
     if let Some(t) = &cfg.thumbwheel {
         let f = need(dev, hidpp::THUMB_WHEEL, "thumb wheel settings")?;
@@ -299,9 +359,9 @@ fn apply(dev: &Device, cfg: &Config, bindings: &[(u16, Action)]) -> Result<Featu
         dev.call(f, 2, &[diverted, t.invert as u8])?;
     }
     let mut reprog = None;
-    if !bindings.is_empty() {
+    if !p.bindings.is_empty() {
         let f = need(dev, hidpp::REPROG_CONTROLS, "button remapping")?;
-        for (cid, action) in bindings {
+        for (cid, action) in &p.bindings {
             let [hi, lo] = cid.to_be_bytes();
             dev.call(f, 3, &[hi, lo, reporting_flags(action, true)])
                 .map_err(|e| format!("diverting button {cid:#06x}: {e}"))?;
@@ -309,18 +369,20 @@ fn apply(dev: &Device, cfg: &Config, bindings: &[(u16, Action)]) -> Result<Featu
         reprog = Some(f);
     }
     let wireless = dev.feature(hidpp::WIRELESS_STATUS)?;
-    Ok(Features { reprog, wireless })
+    Ok(Features {
+        reprog,
+        wireless,
+        wheel,
+        wheel_multiplier,
+    })
 }
 
-fn listen(
-    dev: &Device,
-    feats: &mut Features,
-    cfg: &Config,
-    bindings: &[(u16, Action)],
-) -> Result<(), String> {
-    let lookup = |cid| bindings.iter().find(|b| b.0 == cid).map(|b| &b.1);
+fn listen(dev: &Device, feats: &mut Features, p: &Profile) -> Result<(), String> {
+    let lookup = |cid| p.bindings.iter().find(|b| b.0 == cid).map(|b| &b.1);
+    let speed = p.cfg.wheel.as_ref().and_then(|w| w.speed).unwrap_or(1.0);
     let mut pressed: Vec<u16> = vec![];
     let mut gesture: Option<(u16, i32, i32)> = None;
+    let mut scroll_left = 0.0; // sub-pixel remainder carried between wheel events
 
     while !STOP.load(Relaxed) {
         let Some(r) = dev.read(500)? else { continue };
@@ -330,8 +392,22 @@ fn listen(
         let event = r[3] >> 4;
         if Some(r[2]) == feats.wireless && event == 0 && r[4] == 1 {
             eprintln!("{} reconnected, reapplying", dev.name);
-            *feats = apply(dev, cfg, bindings)?;
+            *feats = apply(dev, p)?;
             (pressed, gesture) = (vec![], None);
+        } else if Some(r[2]) == feats.wheel && event == 0 {
+            // Wheel movement: [flags (0x10 = hi-res units), delta (i16, positive = away from user)].
+            let delta = i16::from_be_bytes([r[5], r[6]]) as f64;
+            let notches = if r[4] & 0x10 != 0 {
+                delta / feats.wheel_multiplier
+            } else {
+                delta
+            };
+            scroll_left += notches * PIXELS_PER_NOTCH * speed;
+            let pixels = scroll_left.trunc();
+            scroll_left -= pixels;
+            if pixels != 0.0 {
+                keys::scroll(pixels as i32);
+            }
         } else if Some(r[2]) == feats.reprog && event == 0 {
             // Diverted buttons event: the up-to-four buttons currently held.
             let now: Vec<u16> = r[4..12]
@@ -394,6 +470,22 @@ fn direction(x: i32, y: i32) -> usize {
             }
         }
     }
+}
+
+/// Lists every connected HID++ device; each stays open until the end so the next open finds another.
+fn list_all() -> Result<(), String> {
+    let api = HidApi::new().map_err(|e| e.to_string())?;
+    let mut seen = vec![];
+    while let Ok(dev) = Device::open(&api, None) {
+        if let Err(e) = list_controls(&dev) {
+            println!("{}\n  {e}", dev.name);
+        }
+        seen.push(dev);
+    }
+    if seen.is_empty() {
+        return Err("no Logitech HID++ devices found".into());
+    }
+    Ok(())
 }
 
 fn list_controls(dev: &Device) -> Result<(), String> {

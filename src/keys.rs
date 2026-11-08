@@ -5,6 +5,14 @@ use std::ffi::c_void;
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn CGEventCreateKeyboardEvent(source: *const c_void, key: u16, down: bool) -> *mut c_void;
+    fn CGEventCreateScrollWheelEvent2(
+        source: *const c_void,
+        units: u32,
+        wheel_count: u32,
+        wheel1: i32,
+        wheel2: i32,
+        wheel3: i32,
+    ) -> *mut c_void;
     fn CGEventSetFlags(event: *mut c_void, flags: u64);
     fn CGEventPost(tap: u32, event: *mut c_void);
     fn CFRelease(cf: *const c_void);
@@ -60,6 +68,19 @@ pub fn press(c: Combo) {
             CGEventPost(0, ev); // kCGHIDEventTap
             CFRelease(ev);
         }
+    }
+}
+
+/// Posts a vertical scroll of `pixels` (positive scrolls up), which apps treat as smooth scrolling.
+pub fn scroll(pixels: i32) {
+    debug!("scroll {pixels}px");
+    unsafe {
+        let ev = CGEventCreateScrollWheelEvent2(std::ptr::null(), 0, 1, pixels, 0, 0); // kCGScrollEventUnitPixel
+        if ev.is_null() {
+            return;
+        }
+        CGEventPost(0, ev);
+        CFRelease(ev);
     }
 }
 
