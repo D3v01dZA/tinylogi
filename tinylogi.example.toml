@@ -1,6 +1,8 @@
 # Copy to ~/.config/tinylogi.toml. Every setting is optional: leaving one out means
 # tinylogi doesn't touch it, so the device keeps whatever it has.
 #
+# After editing, apply it with: tinylogi --reload
+#
 # One [[device]] block per device. Its [device.*] tables belong to the [[device]] above them.
 # With several blocks, each needs a name.
 
