@@ -25,13 +25,10 @@ const USAGE: &str = "usage: tinylogi [--once | --list | --reload] [--debug] [con
   (default)  apply config, then stay in the foreground handling buttons
   --once     apply dpi/smartshift/wheel/thumbwheel settings and exit
   --list     print every connected device's remappable buttons
-  --reload   tell the background tinylogi to reread its config (same as SIGHUP)
+  --reload   tell running tinylogi processes to reread their config (same as SIGHUP)
   --debug    log HID++ traffic, button events and key presses to stderr
 
 config defaults to ~/.config/tinylogi.toml";
-
-// launchd label of the background job the cask installs.
-const AGENT: &str = "net.caltona.tinylogi";
 
 // Set when --list relaunches itself as the app, so the relaunched copy never relaunches again.
 const RELAUNCHED: &str = "TINYLOGI_RELAUNCHED";
@@ -151,7 +148,6 @@ extern "C" fn on_hup(_: i32) {
 
 unsafe extern "C" {
     fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
-    fn getuid() -> u32;
 }
 
 fn main() {
@@ -269,17 +265,28 @@ fn reloader(path: &str) {
     }
 }
 
-/// Sends SIGHUP to the background job; needs no device permissions.
+/// Sends SIGHUP to every other running tinylogi (background job or `make dev`); needs no
+/// device permissions.
 fn reload() -> Result<(), String> {
-    let target = format!("gui/{}/{AGENT}", unsafe { getuid() });
-    let status = std::process::Command::new("launchctl")
-        .args(["kill", "HUP", &target])
+    let me = std::process::id().to_string();
+    let out = std::process::Command::new("pgrep")
+        .args(["-x", "tinylogi"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    let pids: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|&p| p != me)
+        .map(String::from)
+        .collect();
+    if pids.is_empty() {
+        return Err("tinylogi isn't running".into());
+    }
+    std::process::Command::new("kill")
+        .arg("-HUP")
+        .args(&pids)
         .status()
         .map_err(|e| e.to_string())?;
-    if !status.success() {
-        return Err(format!("{AGENT} isn't running as a background job"));
-    }
-    eprintln!("asked tinylogi to reload; see /tmp/tinylogi.log");
+    eprintln!("asked tinylogi to reload; see its log (/tmp/tinylogi.log, or make dev's output)");
     Ok(())
 }
 
