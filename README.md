@@ -9,8 +9,8 @@ rereads its config on `tinylogi --reload`.
 Instead of a per-model device database, it asks each device at runtime which features it
 supports, which keeps the whole thing to a few hundred lines of Rust.
 
-Tested with the MX Master 4 over Bluetooth. Devices behind a Bolt or Unifying receiver work too,
-but that path hasn't been tested on real hardware yet.
+Tested with the MX Master 4 over Bluetooth and through a Bolt receiver. Unifying receivers use the
+same protocol but haven't been tested.
 
 ## Install
 
