@@ -1,6 +1,7 @@
 static DEBUG: AtomicBool = AtomicBool::new(false);
 
-// Log lines go to stderr as "2026-11-08 09:21:17.123 INFO  message".
+// Log lines go to stderr as "2026-11-08 09:21:17.123 INFO  message". Hand-rolled on purpose:
+// `log` + `simplelog` would do the same but roughly double the dependency count.
 macro_rules! log {
     ($level:literal, $($arg:tt)*) => {
         eprintln!("{} {:<5} {}", crate::timestamp(), $level, format_args!($($arg)*))
