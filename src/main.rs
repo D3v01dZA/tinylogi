@@ -20,14 +20,18 @@ use std::os::unix::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::time::Duration;
 
-const USAGE: &str = "usage: tinylogi [--once | --list] [--debug] [config]
+const USAGE: &str = "usage: tinylogi [--once | --list | --reload] [--debug] [config]
 
   (default)  apply config, then stay in the foreground handling buttons
   --once     apply dpi/smartshift/wheel/thumbwheel settings and exit
   --list     print every connected device's remappable buttons
+  --reload   tell the background tinylogi to reread its config (same as SIGHUP)
   --debug    log HID++ traffic, button events and key presses to stderr
 
 config defaults to ~/.config/tinylogi.toml";
+
+// launchd label of the background job the cask installs.
+const AGENT: &str = "net.caltona.tinylogi";
 
 // Control IDs shared by the MX Master line. Others can be given as hex, e.g. "0x01a0".
 const BUTTONS: &[(&str, u16)] = &[
@@ -131,14 +135,20 @@ struct Features {
 }
 
 static STOP: AtomicBool = AtomicBool::new(false);
+static HUP: AtomicBool = AtomicBool::new(false);
 static RELOAD: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_signal(_: i32) {
     STOP.store(true, Relaxed);
 }
 
+extern "C" fn on_hup(_: i32) {
+    HUP.store(true, Relaxed);
+}
+
 unsafe extern "C" {
     fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
+    fn getuid() -> u32;
 }
 
 fn main() {
@@ -154,6 +164,7 @@ fn run() -> Result<(), String> {
         match arg.as_str() {
             "--once" => once = true,
             "--list" => list = true,
+            "--reload" => return reload(),
             "--debug" => DEBUG.store(true, Relaxed),
             "-h" | "--help" => {
                 println!("{USAGE}");
@@ -183,6 +194,7 @@ fn run() -> Result<(), String> {
     unsafe {
         signal(2, on_signal); // SIGINT
         signal(15, on_signal); // SIGTERM
+        signal(1, on_hup); // SIGHUP
     }
     if !hidpp::request_access() {
         return Err(
@@ -194,10 +206,10 @@ fn run() -> Result<(), String> {
     if list {
         return list_all();
     }
-    // One thread per device, each with its own connect/reconnect loop, plus a config watcher.
+    // One thread per device, each with its own connect/reconnect loop, plus one for reloads.
     std::thread::scope(|s| {
         if !once {
-            s.spawn(|| watch(&path));
+            s.spawn(|| reloader(&path));
         }
         let threads: Vec<_> = profiles
             .iter()
@@ -235,26 +247,36 @@ fn load(path: &str, once: bool) -> Result<Vec<Profile>, String> {
         .collect()
 }
 
-/// Polls the config file; when it changes to something valid, stops everything for a restart.
-fn watch(path: &str) {
-    let modified = || std::fs::metadata(path).and_then(|m| m.modified()).ok();
-    let mut seen = modified();
+/// On SIGHUP, checks the config; if it's valid, stops everything for a restart.
+fn reloader(path: &str) {
     while !STOP.load(Relaxed) {
-        std::thread::sleep(Duration::from_secs(1));
-        let now = modified();
-        if now.is_none() || now == seen {
+        std::thread::sleep(Duration::from_millis(200));
+        if !HUP.swap(false, Relaxed) {
             continue;
         }
-        seen = now;
         match load(path, false) {
             Ok(_) => {
-                eprintln!("{path} changed, restarting");
+                eprintln!("reloading {path}");
                 RELOAD.store(true, Relaxed);
                 STOP.store(true, Relaxed);
             }
             Err(e) => eprintln!("{e}; keeping the current config"),
         }
     }
+}
+
+/// Sends SIGHUP to the background job; needs no device permissions.
+fn reload() -> Result<(), String> {
+    let target = format!("gui/{}/{AGENT}", unsafe { getuid() });
+    let status = std::process::Command::new("launchctl")
+        .args(["kill", "HUP", &target])
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err(format!("{AGENT} isn't running as a background job"));
+    }
+    eprintln!("asked tinylogi to reload; see /tmp/tinylogi.log");
+    Ok(())
 }
 
 fn supervise(p: &Profile, once: bool) -> Result<(), String> {

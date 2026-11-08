@@ -5,7 +5,7 @@ A tiny alternative to Logitech Options+ for macOS: one binary, one TOML file, no
 tinylogi talks Logitech's HID++ 2.0 protocol directly to your mouse. It sets DPI, SmartShift,
 the scroll wheel and the thumb wheel, and remaps buttons (including hold-and-swipe gestures) to
 keyboard shortcuts. It runs in the foreground, reapplies settings when the device reconnects, and
-restarts itself when the config file changes.
+rereads its config on `tinylogi --reload`.
 Instead of a per-model device database, it asks each device at runtime which features it
 supports, which keeps the whole thing to a few hundred lines of Rust.
 
@@ -60,8 +60,10 @@ Every setting is optional; anything left out stays as the device has it. Use one
 block per device. Run `tinylogi --list` to see each connected device's remappable buttons. The
 [example config](tinylogi.example.toml) documents every option.
 
-tinylogi watches the config file and applies changes within a second, handing the device back
-and restarting in place. If the new file has an error, it logs it and keeps the current settings.
+After editing the config, apply it with `tinylogi --reload`. tinylogi checks the new file first:
+if it's valid it hands the device back and restarts in place, otherwise it logs the error and
+keeps the current settings. The cask puts `tinylogi` on your PATH; `--reload` needs no
+permissions, but `--list` needs Input Monitoring for your terminal.
 
 ## Development
 
