@@ -62,8 +62,8 @@ block per device. Run `tinylogi --list` to see each connected device's remappabl
 
 After editing the config, apply it with `tinylogi --reload`. tinylogi checks the new file first:
 if it's valid it hands the device back and restarts in place, otherwise it logs the error and
-keeps the current settings. The cask puts `tinylogi` on your PATH; `--reload` needs no
-permissions, but `--list` needs Input Monitoring for your terminal.
+keeps the current settings. The cask puts `tinylogi` on your PATH. Neither `--reload` nor `--list` needs
+permissions for your terminal: `--list` runs itself as the app when the terminal lacks them.
 
 ## Development
 

@@ -33,6 +33,9 @@ config defaults to ~/.config/tinylogi.toml";
 // launchd label of the background job the cask installs.
 const AGENT: &str = "net.caltona.tinylogi";
 
+// Set when --list relaunches itself as the app, so the relaunched copy never relaunches again.
+const RELAUNCHED: &str = "TINYLOGI_RELAUNCHED";
+
 // Control IDs shared by the MX Master line. Others can be given as hex, e.g. "0x01a0".
 const BUTTONS: &[(&str, u16)] = &[
     ("middle", 0x52),
@@ -184,7 +187,13 @@ fn run() -> Result<(), String> {
         Err(_) if list && std::fs::metadata(&path).is_err() => vec![],
         result => result?,
     };
-    if profiles.iter().any(|p| !p.bindings.is_empty()) && !keys::trusted() {
+    if list && !hidpp::has_access() && std::env::var_os(RELAUNCHED).is_none() {
+        // A terminal without Input Monitoring can't open devices, but the app it lives in can.
+        if let Some(app) = app_bundle() {
+            return list_via_app(&app);
+        }
+    }
+    if !list && profiles.iter().any(|p| !p.bindings.is_empty()) && !keys::trusted() {
         eprintln!(
             "warning: no Accessibility permission, key presses will be dropped \
              (System Settings → Privacy & Security → Accessibility, and Device Control & Data Access if present)"
@@ -536,6 +545,33 @@ fn direction(x: i32, y: i32) -> usize {
             }
         }
     }
+}
+
+/// The Tinylogi.app this binary lives in, following the Homebrew symlink.
+fn app_bundle() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let app = exe.ancestors().nth(3)?; // Tinylogi.app/Contents/MacOS/tinylogi
+    (app.extension()? == "app").then(|| app.to_path_buf())
+}
+
+/// Runs --list as the app via LaunchServices, so its own permissions apply, and prints the result.
+fn list_via_app(app: &std::path::Path) -> Result<(), String> {
+    let out = std::env::temp_dir().join(format!("tinylogi-list-{}.txt", std::process::id()));
+    std::fs::write(&out, "").map_err(|e| e.to_string())?;
+    std::process::Command::new("open")
+        .args(["-W", "-n", "--env", &format!("{RELAUNCHED}=1")])
+        .arg("--stdout")
+        .arg(&out)
+        .arg("--stderr")
+        .arg(&out)
+        .arg(app)
+        .args(["--args", "--list"])
+        .status()
+        .map_err(|e| e.to_string())?;
+    let listing = std::fs::read_to_string(&out).map_err(|e| e.to_string());
+    let _ = std::fs::remove_file(&out);
+    print!("{}", listing?);
+    Ok(())
 }
 
 /// Lists every connected HID++ device; each stays open until the end so the next open finds another.

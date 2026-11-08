@@ -27,6 +27,12 @@ pub const THUMB_WHEEL: u16 = 0x2150;
 #[link(name = "IOKit", kind = "framework")]
 unsafe extern "C" {
     fn IOHIDRequestAccess(request: u32) -> bool;
+    fn IOHIDCheckAccess(request: u32) -> u32;
+}
+
+/// Whether Input Monitoring is already granted, without prompting.
+pub fn has_access() -> bool {
+    unsafe { IOHIDCheckAccess(1) == 0 } // kIOHIDRequestTypeListenEvent, kIOHIDAccessTypeGranted
 }
 
 /// Opening a mouse needs Input Monitoring permission; this shows the system prompt the first time.
