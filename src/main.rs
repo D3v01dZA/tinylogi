@@ -1,11 +1,59 @@
 static DEBUG: AtomicBool = AtomicBool::new(false);
 
+// Log lines go to stderr as "2026-11-08 09:21:17.123 INFO  message".
+macro_rules! log {
+    ($level:literal, $($arg:tt)*) => {
+        eprintln!("{} {:<5} {}", crate::timestamp(), $level, format_args!($($arg)*))
+    };
+}
+macro_rules! error { ($($arg:tt)*) => { log!("ERROR", $($arg)*) }; }
+macro_rules! warn { ($($arg:tt)*) => { log!("WARN", $($arg)*) }; }
+macro_rules! info { ($($arg:tt)*) => { log!("INFO", $($arg)*) }; }
 macro_rules! debug {
     ($($arg:tt)*) => {
         if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-            eprintln!($($arg)*);
+            log!("DEBUG", $($arg)*);
         }
     };
+}
+
+#[repr(C)]
+struct Tm {
+    sec: i32,
+    min: i32,
+    hour: i32,
+    mday: i32,
+    mon: i32,
+    year: i32,
+    wday: i32,
+    yday: i32,
+    isdst: i32,
+    gmtoff: i64,
+    zone: *const std::ffi::c_char,
+}
+
+unsafe extern "C" {
+    fn localtime_r(time: *const i64, out: *mut Tm) -> *mut Tm;
+}
+
+/// Local wall-clock time with milliseconds.
+fn timestamp() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs() as i64;
+    let mut t: Tm = unsafe { std::mem::zeroed() };
+    unsafe { localtime_r(&secs, &mut t) };
+    format!(
+        "{}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
+        t.year + 1900,
+        t.mon + 1,
+        t.mday,
+        t.hour,
+        t.min,
+        t.sec,
+        now.subsec_millis()
+    )
 }
 
 mod hidpp;
@@ -152,7 +200,7 @@ unsafe extern "C" {
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("tinylogi: {e}");
+        error!("{e}");
         std::process::exit(1);
     }
 }
@@ -190,8 +238,8 @@ fn run() -> Result<(), String> {
         }
     }
     if !list && profiles.iter().any(|p| !p.bindings.is_empty()) && !keys::trusted() {
-        eprintln!(
-            "warning: no Accessibility permission, key presses will be dropped \
+        warn!(
+            "no Accessibility permission, key presses will be dropped \
              (System Settings → Privacy & Security → Accessibility, and Device Control & Data Access if present)"
         );
     }
@@ -256,11 +304,11 @@ fn reloader(path: &str) {
         }
         match load(path, false) {
             Ok(_) => {
-                eprintln!("reloading {path}");
+                info!("reloading {path}");
                 RELOAD.store(true, Relaxed);
                 STOP.store(true, Relaxed);
             }
-            Err(e) => eprintln!("{e}; keeping the current config"),
+            Err(e) => error!("{e}; keeping the current config"),
         }
     }
 }
@@ -298,7 +346,7 @@ fn supervise(p: &Profile, once: bool) -> Result<(), String> {
             Ok(()) => return Ok(()),
             Err(e) if once => return Err(format!("{}: {e}", p.label())),
             Err(e) if e != last_err => {
-                eprintln!("{}: {e}, waiting for device", p.label());
+                warn!("{}: {e}, waiting for device", p.label());
                 last_err = e;
             }
             Err(_) => {}
@@ -352,7 +400,7 @@ fn bindings(cfg: &DeviceConfig) -> Result<Vec<(u16, Action)>, String> {
 fn session(api: &HidApi, p: &Profile, once: bool) -> Result<(), String> {
     let dev = Device::open(api, Some(&p.cfg.name))?;
     let mut feats = apply(&dev, p)?;
-    eprintln!("configured {}", dev.name);
+    info!("configured {}", dev.name);
     if once {
         return Ok(());
     }
@@ -458,7 +506,7 @@ fn listen(dev: &Device, feats: &mut Features, p: &Profile) -> Result<(), String>
     while !STOP.load(Relaxed) {
         let Some(r) = dev.read(500)? else { continue };
         if hidpp::is_link_up(&r) {
-            eprintln!("{} connected to its receiver, reapplying", dev.name);
+            info!("{} connected to its receiver, reapplying", dev.name);
             *feats = apply(dev, p)?;
             (pressed, gesture) = (vec![], None);
             continue;
@@ -468,7 +516,7 @@ fn listen(dev: &Device, feats: &mut Features, p: &Profile) -> Result<(), String>
         }
         let event = r[3] >> 4;
         if Some(r[2]) == feats.wireless && event == 0 && r[4] == 1 {
-            eprintln!("{} reconnected, reapplying", dev.name);
+            info!("{} reconnected, reapplying", dev.name);
             *feats = apply(dev, p)?;
             (pressed, gesture) = (vec![], None);
         } else if Some(r[2]) == feats.wheel && event == 0 {
