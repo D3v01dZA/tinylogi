@@ -25,11 +25,11 @@ app: build
 	cp $(BIN) $(APP)/Contents/MacOS/tinylogi
 	$(SIGN) $(APP)
 
-# Release asset for the Homebrew cask: the app plus its LaunchAgent and example config.
+# Release asset for the Homebrew cask: the app plus its LaunchAgent, signing cert and example config.
 dist: app
 	rm -rf target/dist $(ZIP)
 	mkdir -p target/dist
-	cp -R $(APP) macos/net.caltona.tinylogi.plist tinylogi.example.toml target/dist/
+	cp -R $(APP) macos/net.caltona.tinylogi.plist macos/tinylogi-cert.pem tinylogi.example.toml target/dist/
 	ditto -c -k --norsrc --noextattr --noacl target/dist $(ZIP)
 	shasum -a 256 $(ZIP)
 

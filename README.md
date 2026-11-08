@@ -14,21 +14,21 @@ same protocol but haven't been tested.
 
 ## Install
 
-tinylogi is signed with a personal certificate rather than an Apple Developer ID, so trust it
-once per Mac first, or macOS refuses to launch it (SHA-1
-`46:09:5E:CF:A5:9F:B4:43:E0:66:93:E5:A4:5C:3C:BA:5A:EF:95:13`):
+The cask puts `Tinylogi.app` in `/Applications` and starts it as a background job at login:
+
+```sh
+brew install --cask D3v01dZA/tap/tinylogi
+```
+
+tinylogi is signed with a personal certificate rather than an Apple Developer ID. The first
+install on each Mac asks for your password to trust it for code signing (SHA-1
+`46:09:5E:CF:A5:9F:B4:43:E0:66:93:E5:A4:5C:3C:BA:5A:EF:95:13`); without that, macOS refuses to
+launch it. To trust it by hand instead:
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/D3v01dZA/tinylogi/master/macos/tinylogi-cert.pem
 security add-trusted-cert -r trustRoot -p codeSign \
   -k ~/Library/Keychains/login.keychain-db tinylogi-cert.pem
-```
-
-Then install. The cask puts `Tinylogi.app` in `/Applications` and starts it as a background job
-at login:
-
-```sh
-brew install --cask D3v01dZA/tap/tinylogi
 ```
 
 Finally:
