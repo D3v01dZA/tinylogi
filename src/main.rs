@@ -62,7 +62,7 @@ struct Config {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DeviceConfig {
-    name: Option<String>,
+    name: String,
     dpi: Option<u16>,
     smartshift: Option<SmartShift>,
     wheel: Option<Wheel>,
@@ -125,7 +125,7 @@ struct Profile {
 
 impl Profile {
     fn label(&self) -> &str {
-        self.cfg.name.as_deref().unwrap_or("any Logitech device")
+        &self.cfg.name
     }
 }
 
@@ -242,11 +242,6 @@ fn load(path: &str, once: bool) -> Result<Vec<Profile>, String> {
     if cfg.devices.is_empty() {
         return Err(format!("{path}: no [[device]] entries"));
     }
-    if cfg.devices.len() > 1 && cfg.devices.iter().any(|d| d.name.is_none()) {
-        return Err(format!(
-            "{path}: with several [[device]] entries, each needs a name"
-        ));
-    }
     cfg.devices
         .into_iter()
         .map(|cfg| {
@@ -312,7 +307,7 @@ fn supervise(p: &Profile, once: bool) -> Result<(), String> {
 }
 
 fn bindings(cfg: &DeviceConfig) -> Result<Vec<(u16, Action)>, String> {
-    let label = cfg.name.as_deref().unwrap_or("device");
+    let label = &cfg.name;
     let mut out = vec![];
     for (name, binding) in &cfg.buttons {
         let ctx = |e: String| format!("{label}: buttons.{name}: {e}");
@@ -348,7 +343,7 @@ fn bindings(cfg: &DeviceConfig) -> Result<Vec<(u16, Action)>, String> {
 }
 
 fn session(api: &HidApi, p: &Profile, once: bool) -> Result<(), String> {
-    let dev = Device::open(api, p.cfg.name.as_deref())?;
+    let dev = Device::open(api, Some(&p.cfg.name))?;
     let mut feats = apply(&dev, p)?;
     eprintln!("configured {}", dev.name);
     if once {

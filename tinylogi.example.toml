@@ -4,10 +4,10 @@
 # After editing, apply it with: tinylogi --reload
 #
 # One [[device]] block per device. Its [device.*] tables belong to the [[device]] above them.
-# With several blocks, each needs a name.
+# Every block needs a name, so a device is never configured with another one's settings.
 
 [[device]]
-name = "MX Master 4"       # substring of the product name; default: first Logitech HID++ device
+name = "MX Master 4"       # required; matches any device whose product name contains it
 dpi = 1200                 # pointer speed; default: unchanged
 
 [device.smartshift]
