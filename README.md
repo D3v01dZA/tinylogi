@@ -75,6 +75,7 @@ signature is what lets macOS keep tinylogi's permissions across rebuilds.
 | `make dev` | Build and run the app in the foreground with debug logging, pausing the installed one; Ctrl-C resumes it |
 | `make log` | Follow the installed app's log |
 | `make app` | Build and sign `target/Tinylogi.app` |
+| `make icon` | Redraw `macos/AppIcon.icns` from `macos/icon.swift` |
 | `make dist` | Zip the app, LaunchAgent and example config for a release |
 | `make release` | Tag `v<version>` from `Cargo.toml`, publish the GitHub release and update the cask in `../homebrew-tap` |
 

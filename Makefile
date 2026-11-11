@@ -8,7 +8,7 @@ TAG := v$(VERSION)
 TAP ?= ../homebrew-tap
 CASK := $(TAP)/Casks/tinylogi.rb
 
-.PHONY: build app dist release dev log
+.PHONY: build app icon dist release dev log
 
 # Sign a fresh copy and move it into place: macOS caches signatures per file, and a binary
 # rewritten in place gets killed at launch (OS_REASON_CODESIGNING).
@@ -20,10 +20,15 @@ build:
 
 app: build
 	rm -rf $(APP)
-	mkdir -p $(APP)/Contents/MacOS
+	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
 	sed 's/VERSION/$(VERSION)/' macos/Info.plist > $(APP)/Contents/Info.plist
+	cp macos/AppIcon.icns $(APP)/Contents/Resources/
 	cp $(BIN) $(APP)/Contents/MacOS/tinylogi
 	$(SIGN) $(APP)
+
+# The icon is committed; this redraws it after editing macos/icon.swift.
+icon:
+	macos/icon.sh
 
 # Release asset for the Homebrew cask: the app plus its LaunchAgent, signing cert and example config.
 dist: app
